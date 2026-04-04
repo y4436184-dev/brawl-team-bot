@@ -32,7 +32,8 @@ def add(m):
 
 def save_player(m):
     if not m.text.isdigit():
-        return bot.send_message(m.chat.id, "❌ Введи число")
+        bot.send_message(m.chat.id, "❌ Введи число")
+        return
 
     data = load(DB)
     data = [p for p in data if p["id"] != m.from_user.id]
@@ -53,7 +54,8 @@ def find(m):
 
 def search(m):
     if not m.text.isdigit():
-        return bot.send_message(m.chat.id, "❌ Введи число")
+        bot.send_message(m.chat.id, "❌ Введи число")
+        return
 
     trophies = int(m.text)
     data = load(DB)
@@ -64,8 +66,7 @@ def search(m):
             found = True
             bot.send_message(
                 m.chat.id,
-                f"{p['name']} — {p['trophies']}🏆\n"
-                f"tg://user?id={p['id']}"
+                f"{p['name']} — {p['trophies']}🏆"
             )
 
     if not found:
@@ -97,7 +98,8 @@ def join_team(m):
         if t["code"] == code:
             t["members"].append(m.from_user.first_name)
             save(TEAMS, teams)
-            return bot.send_message(m.chat.id, "✅ Ты в команде!")
+            bot.send_message(m.chat.id, "✅ Ты в команде!")
+            return
 
     bot.send_message(m.chat.id, "❌ Команда не найдена")
 
