@@ -1,6 +1,9 @@
 import telebot
 from telebot import types
-import json, os, random, string
+import json
+import os
+import random
+import string
 
 TOKEN = "8772165536:AAHK143uITrz_xFYkA_obH36vnjoDfnNkvU"
 bot = telebot.TeleBot(TOKEN)
@@ -64,10 +67,7 @@ def search(m):
     for p in data:
         if abs(p["trophies"] - trophies) <= 500:
             found = True
-            bot.send_message(
-                m.chat.id,
-                f"{p['name']} — {p['trophies']}🏆"
-            )
+            bot.send_message(m.chat.id, f"{p['name']} — {p['trophies']}🏆")
 
     if not found:
         bot.send_message(m.chat.id, "❌ Никого не найдено")
@@ -99,9 +99,9 @@ def join_team(m):
             t["members"].append(m.from_user.first_name)
             save(TEAMS, teams)
             bot.send_message(m.chat.id, "✅ Ты в команде!")
-            
+            return
 
-    ,"❌ Команда не найдена")
+    bot.send_message(m.chat.id, "❌ Команда не найдена")
 
 if __name__ == "__main__":
     bot.infinity_polling()
