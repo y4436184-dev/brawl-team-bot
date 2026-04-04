@@ -49,4 +49,4 @@ def find(m):
 
 def search(m):
     if not m.text.isdigit():
-        return bot.send_message(m.chat.id, "❌ В
+        return bot.send_message(m.chat.id, "❌ Введи число")
