@@ -4,6 +4,8 @@ import json
 import os
 import random
 import string
+import threading
+from flask import Flask
 
 TOKEN = "8772165536:AAHK143uITrz_xFYkA_obH36vnjoDfnNkvU"
 bot = telebot.TeleBot(TOKEN)
@@ -11,6 +13,21 @@ bot = telebot.TeleBot(TOKEN)
 DB = "players.json"
 TEAMS = "teams.json"
 
+# ---------- Flask (нужно для Render) ----------
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running"
+
+def run():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+def bot_run():
+    bot.infinity_polling()
+
+# ---------- Работа с файлами ----------
 def load(file):
     if not os.path.exists(file):
         return []
@@ -21,6 +38,7 @@ def save(file, data):
     with open(file, "w") as f:
         json.dump(data, f)
 
+# ---------- Команды ----------
 @bot.message_handler(commands=['start'])
 def start(m):
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -103,23 +121,7 @@ def join_team(m):
 
     bot.send_message(m.chat.id, "❌ Команда не найдена")
 
-import threading
-import os
-from flask import Flask
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Bot is running"
-
-def run():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
-def bot_run():
-    bot.infinity_polling()
-
+# ---------- Запуск ----------
 if __name__ == "__main__":
-    threading.Thread(target=run).start()
-    bot_run()
+    threading.Thread(target=bot_run).start()
+    run()
