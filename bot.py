@@ -99,9 +99,9 @@ def join_team(m):
             t["members"].append(m.from_user.first_name)
             save(TEAMS, teams)
             bot.send_message(m.chat.id, "✅ Ты в команде!")
-            return
+            
 
-    bot.send_message(m.chat.id, "❌ Команда не найдена")
+    ,"❌ Команда не найдена")
 
 if __name__ == "__main__":
     bot.infinity_polling()
