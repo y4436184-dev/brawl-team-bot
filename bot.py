@@ -103,5 +103,23 @@ def join_team(m):
 
     bot.send_message(m.chat.id, "❌ Команда не найдена")
 
-if __name__ == "__main__":
+import threading
+import os
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running"
+
+def run():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+def bot_run():
     bot.infinity_polling()
+
+if __name__ == "__main__":
+    threading.Thread(target=run).start()
+    bot_run()
