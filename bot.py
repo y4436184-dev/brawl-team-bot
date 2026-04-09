@@ -1,290 +1,220 @@
 import telebot
 from telebot import types
-import json
-import os
-import threading
-import time
-from flask import Flask
+import json, os, threading, time
 
 TOKEN = "8772165536:AAHK143uITrz_xFYkA_obH36vnjoDfnNkvU"
-PROVIDER_TOKEN = "8772165536:AAHK143uITrz_xFYkA_obH36vnjoDfnNkvU"
+OWNER_ID = 123456789
+ADMINS = [123456789]
+LOG_CHAT = 123456789
 
 bot = telebot.TeleBot(TOKEN)
 
 DB = "players.json"
-CLUBS = "clubs.json"
 
 chats = {}
-PRO_USERS = []
-last_search = {}
+PRO_USERS = set()
+DONATE = {}
+BANNED = set()
+last_game = {}
+spam = {}
+daily = {}
 
-# ---------- Flask ----------
-app = Flask(__name__)
+# ---------- utils ----------
+def format_trophies(n): return f"{n:,}".replace(",", ".")
 
-@app.route('/')
-def home():
-    return "OK"
+def load():
+    if not os.path.exists(DB): return []
+    with open(DB) as f: return json.load(f)
 
-def run():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+def save(data):
+    with open(DB,"w") as f: json.dump(data,f)
 
-# ---------- Формат ----------
-def format_trophies(num):
-    return f"{num:,}".replace(",", ".")
+def log(text):
+    try:
+        bot.send_message(LOG_CHAT, f"📜 {text}")
+    except:
+        pass
 
-# ---------- БАЗЫ ----------
-def load(file):
-    if not os.path.exists(file):
-        return []
-    with open(file, "r") as f:
-        return json.load(f)
+def check_spam(uid):
+    if uid in spam and time.time()-spam[uid] < 1:
+        return False
+    spam[uid] = time.time()
+    return True
 
-def save(file, data):
-    with open(file, "w") as f:
-        json.dump(data, f)
-
-# ---------- СТАРТ ----------
+# ---------- START ----------
 @bot.message_handler(commands=['start'])
 def start(m):
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("➕ Добавить себя", "🔍 Найти тиму")
-    kb.add("⚡ Авто поиск", "👤 Профиль")
-    kb.add("💬 Чат", "⭐ PRO")
-    kb.add("🏠 Клубы", "📢 Создать клуб")
-    kb.add("❌ Удалить себя")
+    if m.from_user.id in BANNED: return
+    kb=types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add("➕ Добавить себя","⚡ Поиск")
+    kb.add("👤 Профиль","⭐ PRO")
+    kb.add("🛒 Магазин","🎁 Бонус")
+    kb.add("👑 Админ")
+    bot.send_message(m.chat.id,"🔥 Brawl Aura Bot",reply_markup=kb)
+    log(f"👤 {m.from_user.id} зашел")
 
-    bot.send_message(m.chat.id, "🔥 Brawl Aura Bot", reply_markup=kb)
-
-# ---------- ПРОФИЛЬ ----------
-@bot.message_handler(func=lambda m: m.text == "👤 Профиль")
-def profile(m):
-    data = load(DB)
-
-    for p in data:
-        if p["id"] == m.from_user.id:
-            name = p["name"]
-            if p["id"] in PRO_USERS:
-                name = "👑 " + name
-
-            bot.send_message(m.chat.id,
-                             f"👤 {name}\n"
-                             f"🏆 {format_trophies(p['trophies'])}\n"
-                             f"🎮 {p['mode']}\n"
-                             f"⚡ {p['skill']}")
-            return
-
-    bot.send_message(m.chat.id, "❌ Ты не добавлен")
-
-# ---------- УДАЛИТЬ ----------
-@bot.message_handler(func=lambda m: m.text == "❌ Удалить себя")
-def remove(m):
-    data = load(DB)
-    data = [p for p in data if p["id"] != m.from_user.id]
-    save(DB, data)
-
-    bot.send_message(m.chat.id, "❌ Ты удалён")
-
-# ---------- PRO ----------
-@bot.message_handler(func=lambda m: m.text == "⭐ PRO")
-def pro_menu(m):
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("💳 Купить за 15⭐", callback_data="buy_pro"))
-
-    bot.send_message(m.chat.id,
-                     "⭐ PRO статус\n\n"
-                     "👑 VIP\n"
-                     "🔥 Приоритет\n"
-                     "⚡ Быстрый поиск",
-                     reply_markup=kb)
-
-@bot.callback_query_handler(func=lambda call: call.data == "buy_pro")
-def buy_pro(call):
-    bot.send_invoice(
-        call.message.chat.id,
-        title="PRO статус",
-        description="VIP функции",
-        invoice_payload="pro",
-        provider_token=PROVIDER_TOKEN,
-        currency="XTR",
-        prices=[types.LabeledPrice("PRO", 15)]
-    )
-
-@bot.pre_checkout_query_handler(func=lambda q: True)
-def checkout(q):
-    bot.answer_pre_checkout_query(q.id, ok=True)
-
-@bot.message_handler(content_types=['successful_payment'])
-def got_payment(m):
-    if m.from_user.id not in PRO_USERS:
-        PRO_USERS.append(m.from_user.id)
-
-    bot.send_message(m.chat.id, "👑 Ты PRO!")
-
-# ---------- ДОБАВИТЬ ----------
-@bot.message_handler(func=lambda m: m.text == "➕ Добавить себя")
+# ---------- ADD ----------
+@bot.message_handler(func=lambda m:m.text=="➕ Добавить себя")
 def add(m):
-    msg = bot.send_message(m.chat.id, "🏆 Кубки:")
-    bot.register_next_step_handler(msg, get_trophies)
+    if m.from_user.id in BANNED or not check_spam(m.from_user.id): return
+    msg=bot.send_message(m.chat.id,"🏆 Кубки:")
+    bot.register_next_step_handler(msg,get_trophies)
 
 def get_trophies(m):
     if not m.text.isdigit():
-        bot.send_message(m.chat.id, "❌ Число")
+        bot.send_message(m.chat.id,"❌ число")
         return
 
-    trophies = int(m.text)
-
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🟢 ШД", "👥 3v3", "🏆 Ранговый")
-
-    msg = bot.send_message(m.chat.id, "🎮 Режим:", reply_markup=kb)
-    bot.register_next_step_handler(msg, lambda msg: get_mode(msg, trophies))
-
-def get_mode(m, trophies):
-    mode = m.text
-
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🐢 Нуб", "⚡ Средний", "🔥 Про")
-
-    msg = bot.send_message(m.chat.id, "⚡ Скилл:", reply_markup=kb)
-    bot.register_next_step_handler(msg, lambda msg: save_player(msg, trophies, mode))
-
-def save_player(m, trophies, mode):
-    skill = m.text
-
-    data = load(DB)
-    data = [p for p in data if p["id"] != m.from_user.id]
-
+    data=[p for p in load() if p["id"]!=m.from_user.id]
     data.append({
-        "id": m.from_user.id,
-        "name": m.from_user.first_name,
-        "trophies": trophies,
-        "mode": mode,
-        "skill": skill
+        "id":m.from_user.id,
+        "name":m.from_user.first_name,
+        "trophies":int(m.text),
+        "wins":0,"loses":0,"streak":0,"rank":"Не выбрана"
     })
+    save(data)
+    bot.send_message(m.chat.id,"✅ Готово")
 
-    save(DB, data)
-    bot.send_message(m.chat.id, "✅ Добавлен!")
-
-# ---------- АВТО ПОИСК ----------
-@bot.message_handler(func=lambda m: m.text == "⚡ Авто поиск")
-def auto_find(m):
-    if m.from_user.id in last_search:
-        if time.time() - last_search[m.from_user.id] < 5:
-            bot.send_message(m.chat.id, "⏳ Подожди")
+# ---------- PROFILE ----------
+@bot.message_handler(func=lambda m:m.text=="👤 Профиль")
+def profile(m):
+    if m.from_user.id in BANNED: return
+    for p in load():
+        if p["id"]==m.from_user.id:
+            name="👑 "+p["name"] if p["id"] in PRO_USERS else p["name"]
+            bot.send_message(m.chat.id,
+                f"{name}\n🏆 {format_trophies(p['trophies'])}\n🏅 {p['rank']}\n🔥 {p['streak']}")
             return
 
-    last_search[m.from_user.id] = time.time()
+# ---------- SEARCH ----------
+@bot.message_handler(func=lambda m:m.text=="⚡ Поиск")
+def search(m):
+    if m.from_user.id in BANNED: return
+    for p in load():
+        if p["id"]!=m.from_user.id:
+            kb=types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("💬",callback_data=f"chat_{p['id']}"))
+            bot.send_message(m.chat.id,f"{p['name']} {format_trophies(p['trophies'])}",reply_markup=kb)
 
-    data = load(DB)
+# ---------- CHAT ----------
+@bot.callback_query_handler(func=lambda c:c.data.startswith("chat_"))
+def chat_start(c):
+    t=int(c.data.split("_")[1])
+    chats[c.from_user.id]=t
+    chats[t]=c.from_user.id
 
-    for base in data:
-        if base["id"] == m.from_user.id:
-            for p in data:
-                if p["id"] != m.from_user.id and abs(p["trophies"] - base["trophies"]) <= 500:
-
-                    name = p["name"]
-                    if p["id"] in PRO_USERS:
-                        name = "👑 " + name
-
-                    kb = types.InlineKeyboardMarkup()
-                    kb.add(types.InlineKeyboardButton("💬 Написать", callback_data=f"chat_{p['id']}"))
-
-                    bot.send_message(m.chat.id,
-                                     f"👤 {name}\n"
-                                     f"🏆 {format_trophies(p['trophies'])}\n"
-                                     f"🎮 {p['mode']}\n"
-                                     f"⚡ {p['skill']}",
-                                     reply_markup=kb)
-            return
-
-    bot.send_message(m.chat.id, "❌ Добавь себя")
-
-# ---------- КЛУБЫ ----------
-@bot.message_handler(func=lambda m: m.text == "📢 Создать клуб")
-def create_club(m):
-    msg = bot.send_message(m.chat.id, "🏷 Название клуба:")
-    bot.register_next_step_handler(msg, club_name)
-
-def club_name(m):
-    name = m.text
-    msg = bot.send_message(m.chat.id, "🏆 Требования:")
-    bot.register_next_step_handler(msg, lambda msg: club_trophies(msg, name))
-
-def club_trophies(m, name):
-    if not m.text.isdigit():
-        bot.send_message(m.chat.id, "❌ Число")
-        return
-
-    trophies = int(m.text)
-    msg = bot.send_message(m.chat.id, "📝 Описание:")
-    bot.register_next_step_handler(msg, lambda msg: save_club(msg, name, trophies))
-
-def save_club(m, name, trophies):
-    desc = m.text
-
-    clubs = load(CLUBS)
-
-    clubs.append({
-        "owner": m.from_user.id,
-        "name": name,
-        "trophies": trophies,
-        "desc": desc
-    })
-
-    save(CLUBS, clubs)
-    bot.send_message(m.chat.id, "✅ Клуб создан!")
-
-@bot.message_handler(func=lambda m: m.text == "🏠 Клубы")
-def show_clubs(m):
-    clubs = load(CLUBS)
-
-    if not clubs:
-        bot.send_message(m.chat.id, "❌ Нет клубов")
-        return
-
-    for c in clubs:
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("💬 Написать", callback_data=f"club_{c['owner']}"))
-
-        bot.send_message(m.chat.id,
-                         f"🏠 {c['name']}\n"
-                         f"🏆 {format_trophies(c['trophies'])}\n"
-                         f"📝 {c['desc']}",
-                         reply_markup=kb)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("club_"))
-def club_chat(call):
-    target = int(call.data.split("_")[1])
-
-    chats[call.from_user.id] = target
-    chats[target] = call.from_user.id
-
-    bot.send_message(call.from_user.id, "💬 Чат открыт")
-    bot.send_message(target, "📩 Игрок по клубу")
-
-# ---------- ЧАТ ----------
-@bot.callback_query_handler(func=lambda call: call.data.startswith("chat_"))
-def start_chat(call):
-    target = int(call.data.split("_")[1])
-
-    chats[call.from_user.id] = target
-    chats[target] = call.from_user.id
-
-    bot.send_message(call.from_user.id, "💬 Чат начат")
-    bot.send_message(target, "💬 С тобой начали чат")
-
-@bot.message_handler(func=lambda m: True)
+@bot.message_handler(func=lambda m:True)
 def chat(m):
     if m.from_user.id in chats:
-        target = chats[m.from_user.id]
-        bot.send_message(target, f"{m.from_user.first_name}: {m.text}")
+        bot.send_message(chats[m.from_user.id],m.text)
+        log(f"💬 {m.from_user.id}: {m.text}")
 
-# ---------- ЗАПУСК ----------
-def bot_run():
-    print("Bot started")
-    bot.infinity_polling()
+# ---------- WIN ----------
+@bot.message_handler(commands=['win'])
+def win(m):
+    if m.from_user.id in BANNED: return
 
-if __name__ == "__main__":
-    threading.Thread(target=bot_run).start()
-    run()
+    if m.from_user.id in last_game and time.time()-last_game[m.from_user.id]<60:
+        bot.send_message(m.chat.id,"⏳ подожди")
+        return
+
+    last_game[m.from_user.id]=time.time()
+
+    data=load()
+    for p in data:
+        if p["id"]==m.from_user.id:
+            if p["streak"]>10:
+                BANNED.add(m.from_user.id)
+                bot.send_message(m.chat.id,"🚫 Бан за чит")
+                return
+
+            bonus=30+p["streak"]*5
+            p["trophies"]+=bonus
+            p["wins"]+=1
+            p["streak"]+=1
+
+    save(data)
+    bot.send_message(m.chat.id,f"🏆 +{bonus}")
+
+# ---------- LOSE ----------
+@bot.message_handler(commands=['lose'])
+def lose(m):
+    data=load()
+    for p in data:
+        if p["id"]==m.from_user.id:
+            p["trophies"]-=15
+            p["loses"]+=1
+            p["streak"]=0
+    save(data)
+    bot.send_message(m.chat.id,"💀")
+
+# ---------- SHOP ----------
+@bot.message_handler(func=lambda m:m.text=="🛒 Магазин")
+def shop(m):
+    bot.send_message(m.chat.id,"👑 PRO 15⭐\n📢 Реклама 20⭐ (@Vpn_broo)")
+
+@bot.message_handler(func=lambda m:m.text.lower()=="купить pro")
+def buy(m):
+    PRO_USERS.add(m.from_user.id)
+    DONATE[m.from_user.id]=DONATE.get(m.from_user.id,0)+15
+    bot.send_message(m.chat.id,"👑 PRO")
+
+@bot.message_handler(func=lambda m:m.text.lower()=="купить реклама")
+def ads(m):
+    bot.send_message(m.chat.id,"Отправь текст")
+    bot.register_next_step_handler(m,send_ads)
+
+def send_ads(m):
+    bot.send_message(OWNER_ID,f"📢 {m.text}")
+    bot.send_message(m.chat.id,"✅")
+
+# ---------- BONUS ----------
+@bot.message_handler(func=lambda m:m.text=="🎁 Бонус")
+def bonus(m):
+    if m.from_user.id in daily and time.time()-daily[m.from_user.id]<86400:
+        bot.send_message(m.chat.id,"⏳")
+        return
+    daily[m.from_user.id]=time.time()
+    bot.send_message(m.chat.id,"🎁 +100")
+
+# ---------- ADMIN ----------
+@bot.message_handler(func=lambda m:m.text=="👑 Админ")
+def admin(m):
+    if m.from_user.id not in ADMINS: return
+    kb=types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add("📊 Стата","👥 Юзеры")
+    kb.add("💰 Донаты","🚫 Бан лист")
+    bot.send_message(m.chat.id,"Админка",reply_markup=kb)
+
+@bot.message_handler(func=lambda m:m.text=="📊 Стата")
+def stat(m):
+    if m.from_user.id not in ADMINS: return
+    bot.send_message(m.chat.id,f"👥 {len(load())}\n💰 {sum(DONATE.values())}")
+
+@bot.message_handler(func=lambda m:m.text=="👥 Юзеры")
+def users(m):
+    if m.from_user.id not in ADMINS: return
+    text="\n".join([str(p["id"]) for p in load()])
+    bot.send_message(m.chat.id,text)
+
+@bot.message_handler(func=lambda m:m.text=="🚫 Бан лист")
+def banlist(m):
+    if m.from_user.id not in ADMINS: return
+    bot.send_message(m.chat.id,"\n".join(map(str,BANNED)) or "Пусто")
+
+@bot.message_handler(commands=['ban'])
+def ban(m):
+    if m.from_user.id not in ADMINS: return
+    uid=int(m.text.split()[1])
+    BANNED.add(uid)
+    bot.send_message(m.chat.id,"🔨")
+
+@bot.message_handler(commands=['unban'])
+def unban(m):
+    if m.from_user.id not in ADMINS: return
+    uid=int(m.text.split()[1])
+    BANNED.discard(uid)
+    bot.send_message(m.chat.id,"✅")
+
+# ---------- RUN ----------
+bot.infinity_polling()
