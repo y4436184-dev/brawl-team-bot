@@ -3,9 +3,9 @@ from telebot import types
 import json, os, threading, time
 
 TOKEN = "8772165536:AAHK143uITrz_xFYkA_obH36vnjoDfnNkvU"
-OWNER_ID = 123456789
-ADMINS = [123456789]
-LOG_CHAT = 123456789
+OWNER_ID = 7027068118
+ADMINS = [7027068118]
+LOG_CHAT = 7027068118
 
 bot = telebot.TeleBot(TOKEN)
 
