@@ -3,12 +3,15 @@ from telebot import types
 import json, os
 
 TOKEN = "8772165536:AAHK143uITrz_xFYkA_obH36vnjoDfnNkvU"
+OWNER = "@Vpnbroo"
 ADMINS = [7027068118]
 
 bot = telebot.TeleBot(TOKEN)
 
 DB = "players.json"
 TOURS = "tournaments.json"
+
+PENDING = {}
 
 # ---------- БАЗА ----------
 def load(file):
@@ -29,11 +32,10 @@ def format_trophies(n):
 def start(m):
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("➕ Добавить себя", "👤 Профиль")
-    kb.add("🎮 Турниры", "⚡ Подбор")
-    kb.add("🏆 Рейтинг", "📋 Игроки")
-    kb.add("👑 Админ")
+    kb.add("🎮 Турниры", "🏆 Рейтинг")
+    kb.add("⚡ Найти тиммейта", "👑 Админ")
 
-    bot.send_message(m.chat.id, "🔥 Aura Esport Bot", reply_markup=kb)
+    bot.send_message(m.chat.id, "🔥 Aura Tour Bot", reply_markup=kb)
 
 # ---------- ДОБАВИТЬ ----------
 @bot.message_handler(func=lambda m: m.text == "➕ Добавить себя")
@@ -74,28 +76,19 @@ def profile(m):
 def rating(m):
     data = sorted(load(DB), key=lambda x: x["wins"], reverse=True)
 
-    text = "🏆 Топ игроков:\n\n"
+    text = "🏆 ТОП игроков:\n\n"
     for i, p in enumerate(data[:10]):
         text += f"{i+1}. {p['name']} — {p['wins']} побед\n"
 
     bot.send_message(m.chat.id, text)
 
-# ---------- ИГРОКИ ----------
-@bot.message_handler(func=lambda m: m.text == "📋 Игроки")
-def players(m):
-    text = "📋 Игроки:\n\n"
-    for p in load(DB):
-        text += f"{p['name']} — {format_trophies(p['trophies'])}\n"
+# ---------- ПОИСК ТИМЫ ----------
+@bot.message_handler(func=lambda m: m.text == "⚡ Найти тиммейта")
+def find_tm(m):
+    msg = bot.send_message(m.chat.id, "🏆 Введи свои кубки:")
+    bot.register_next_step_handler(msg, search_team)
 
-    bot.send_message(m.chat.id, text)
-
-# ---------- БЫСТРЫЙ ПОДБОР ----------
-@bot.message_handler(func=lambda m: m.text == "⚡ Подбор")
-def match(m):
-    msg = bot.send_message(m.chat.id, "🏆 Введи кубки:")
-    bot.register_next_step_handler(msg, find_team)
-
-def find_team(m):
+def search_team(m):
     if not m.text.isdigit():
         bot.send_message(m.chat.id, "❌ Введи число")
         return
@@ -103,13 +96,18 @@ def find_team(m):
     trophies = int(m.text)
     players = load(DB)
 
-    found = [p for p in players if abs(p["trophies"] - trophies) <= 1000 and p["id"] != m.from_user.id]
+    found = []
+
+    for p in players:
+        if abs(p["trophies"] - trophies) <= 1000 and p["id"] != m.from_user.id:
+            found.append(p)
 
     if not found:
-        bot.send_message(m.chat.id, "❌ Никого нет")
+        bot.send_message(m.chat.id, "❌ Тиммейтов не найдено")
         return
 
-    text = "🔥 Тима найдена:\n\n"
+    text = "🔥 Подходящие тиммейты:\n\n"
+
     for p in found[:5]:
         text += f"{p['name']} — {format_trophies(p['trophies'])}\n"
 
@@ -117,113 +115,56 @@ def find_team(m):
 
 # ---------- ТУРНИРЫ ----------
 @bot.message_handler(func=lambda m: m.text == "🎮 Турниры")
-def tournaments(m):
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("➕ Создать", "📋 Все турниры")
-    kb.add("⬅️ Назад")
+def tours(m):
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("💰 Войти в турнир (15⭐)", callback_data="buy"))
 
-    bot.send_message(m.chat.id, "🎮 Турниры", reply_markup=kb)
+    bot.send_message(
+        m.chat.id,
+        f"🎮 Турнир\n\n💰 Цена: 15⭐\n\n👉 Оплата: {OWNER}",
+        reply_markup=kb
+    )
 
-# ---------- СОЗДАТЬ ----------
-@bot.message_handler(func=lambda m: m.text == "➕ Создать")
-def create(m):
-    msg = bot.send_message(m.chat.id, "⚡ Режим:")
-    bot.register_next_step_handler(msg, choose_map)
+# ---------- ПОКУПКА ----------
+@bot.callback_query_handler(func=lambda c: True)
+def buy(c):
+    if c.data == "buy":
+        PENDING[c.from_user.id] = True
 
-def choose_map(m):
-    mode = m.text
-    msg = bot.send_message(m.chat.id, "🗺 Карта:")
-    bot.register_next_step_handler(msg, save_tour, mode)
+        bot.send_message(c.message.chat.id,
+            f"💰 Оплати 15⭐ → {OWNER}\n\n"
+            f"📩 Потом отправь чек или 'оплатил'")
 
-def save_tour(m, mode):
-    tours = load(TOURS)
+# ---------- ЗАЯВКА ----------
+@bot.message_handler(func=lambda m: m.from_user.id in PENDING)
+def check_payment(m):
 
-    tours.append({
-        "id": len(tours),
-        "creator": m.from_user.first_name,
-        "mode": mode,
-        "map": m.text,
-        "players": [],
-        "winner": None
-    })
+    bot.send_message(ADMINS[0],
+        f"💰 ЗАЯВКА\nID: {m.from_user.id}\n\n{m.text}")
 
-    save(TOURS, tours)
-    bot.send_message(m.chat.id, "✅ Турнир создан")
+    bot.send_message(m.chat.id, "⏳ Жди подтверждения")
 
-# ---------- СПИСОК ----------
-@bot.message_handler(func=lambda m: m.text == "📋 Все турниры")
-def all_tours(m):
-    tours = load(TOURS)
-
-    if not tours:
-        bot.send_message(m.chat.id, "❌ Нет турниров")
-        return
-
-    for t in tours:
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("✅ Вступить", callback_data=f"join_{t['id']}"))
-
-        text = f"🎮 #{t['id']} | {t['mode']} | {t['map']} | 👥 {len(t['players'])}"
-
-        bot.send_message(m.chat.id, text, reply_markup=kb)
-
-# ---------- ВСТУПИТЬ ----------
-@bot.callback_query_handler(func=lambda c: c.data.startswith("join_"))
-def join(c):
-    tour_id = int(c.data.split("_")[1])
-    tours = load(TOURS)
-
-    for t in tours:
-        if t["id"] == tour_id:
-            msg = bot.send_message(c.message.chat.id, "🔑 Код команды:")
-            bot.register_next_step_handler(msg, add_player, t)
-            return
-
-# ---------- ДОБАВИТЬ ----------
-def add_player(m, tour):
-    tour["players"].append({
-        "name": m.from_user.first_name,
-        "code": m.text
-    })
-
-    tours = load(TOURS)
-    for i in range(len(tours)):
-        if tours[i]["id"] == tour["id"]:
-            tours[i] = tour
-
-    save(TOURS, tours)
-    bot.send_message(m.chat.id, "✅ Вошёл")
-
-# ---------- АДМИН ----------
-@bot.message_handler(commands=['win'])
-def win(m):
+# ---------- ПОДТВЕРЖДЕНИЕ ----------
+@bot.message_handler(commands=['approve'])
+def approve(m):
     if m.from_user.id not in ADMINS:
         return
 
-    args = m.text.split()
-    if len(args) < 3:
-        return
+    try:
+        uid = int(m.text.split()[1])
 
-    tour_id = int(args[1])
-    name = args[2]
+        tours = load(TOURS)
+        tours.append({"player": uid})
 
-    tours = load(TOURS)
-    players = load(DB)
+        save(TOURS, tours)
 
-    for t in tours:
-        if t["id"] == tour_id:
-            t["winner"] = name
+        bot.send_message(uid, "✅ Ты в турнире!")
+        bot.send_message(m.chat.id, "✅ Готово")
 
-    for p in players:
-        if p["name"] == name:
-            p["wins"] += 1
+    except:
+        bot.send_message(m.chat.id, "❌ Ошибка")
 
-    save(TOURS, tours)
-    save(DB, players)
-
-    bot.send_message(m.chat.id, "🏆 Победа засчитана")
-
-# ---------- АДМИН ПАНЕЛЬ ----------
+# ---------- АДМИН ----------
 @bot.message_handler(func=lambda m: m.text == "👑 Админ")
 def admin(m):
     if m.from_user.id not in ADMINS:
@@ -231,13 +172,8 @@ def admin(m):
 
     bot.send_message(
         m.chat.id,
-        f"👥 {len(load(DB))}\n🎮 {len(load(TOURS))}"
+        f"👥 Игроков: {len(load(DB))}\n🎮 Турнир: {len(load(TOURS))}"
     )
-
-# ---------- НАЗАД ----------
-@bot.message_handler(func=lambda m: m.text == "⬅️ Назад")
-def back(m):
-    start(m)
 
 # ---------- ЗАПУСК ----------
 bot.infinity_polling()
